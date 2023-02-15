@@ -1,0 +1,119 @@
+{
+    "Dir": {
+        "data_root": "../../data/locomotion",
+        "data_dir": "/root/home/project/Data/root_position_foot_all/npz",
+        "log_root": "/root/home/project/Data/results"
+    },
+    "Glow" : {
+        "hidden_channels": 512,
+        "K": 8,
+        "actnorm_scale": 1.0,
+        "flow_permutation": "invconv",
+        "flow_coupling": "affine",
+        "network_model": "LSTM_ENV",
+        "num_layers": 2,
+        "num_foots" : 4,
+        "LU_decomposed": true,
+		"distribution": "normal"
+    },
+    "Data" : {
+        "framerate": 30,
+        "seqlen": 10,
+        "n_lookahead":0, 
+        "dropout":0.95, 
+        "dropout_env":0.5,
+        "mirror":true, 
+        "reverse_time":true 
+    },
+    "Optim": {
+        "name": "adam",
+        "args": {
+            "lr": 1e-4,
+            "betas": [0.9, 0.999],
+            "eps": 1e-8
+        },
+        "Schedule": {
+            "name": "noam_learning_rate_decay",
+            "args": {
+                "warmup_steps": 1000,
+                "minimum": 1e-4
+            }
+        }
+    },
+    "Device": {
+        "glow": ["cuda:1"],
+        "data": "cuda:1"
+    },
+    "Train": {
+        "model": "gmm_env_wo_gmm",
+        "calc": "mu_var",
+        "condmodel" :"enc",
+        "footmodel" :"concat",
+        "train_cond_enc":false,
+        "batch_size": 50,
+        "validation_size": 90,
+        "num_batches": 200000,
+        "max_grad_clip": 5,
+        "max_grad_norm": 100,
+        "max_checkpoints": 20,
+        "checkpoints_gap": 20000,
+        "num_plot_samples": 1,
+        "scalar_log_gap": 50,
+        "validation_log_gap": 695,
+        "plot_gap": 20000,
+        "warm_start": "",
+        "datasets":"locomotion"
+    },
+    "Spline":{
+        "coupling_layer_type":"rational_quadratic_spline",
+        "num_bins": 66,
+        "tail_bound": 7,
+        "min_bin_width": 1e-3,
+        "min_bin_height": 1e-3,
+        "min_derivative": 1e-3,
+        "apply_unconditional_transform": false
+    },
+    "Gumbel":{
+        "num_classes" : 10,
+        "w_gauss": 1.0,
+        "w_categ":1.0,
+        "w_rec":1.0,
+        "w_foot":4.0,
+        "rec_type":"mse",
+        "verbose" : 0,
+        "init_temp" :1.0,
+        "decay_temp" :1.0,
+        "hard_gumbel" :0.0,
+        "min_temp":0.5,
+        "decay_temp_rate":3.9771e-4,
+        "fixed_temp" : false,
+        "fixed_temp_value": 1.0
+    },
+    "Dlow":{
+        "train" : true,
+        "nh_mlp": [1024, 512],
+        "nh_rnn": 128,
+        "rnn_type": "gru", 
+        "x_birnn" : false,
+        "fix_first": false,
+        "lambda_j": 25,
+        "lambda_recon": 1.0,
+        "lambda_kl" : 1.0,
+        "nSample" : 3,
+        "d_scale": 1.7,
+        "plot_gap": 3475,
+        "checkpoints_gap": 6950,
+        "validation_log_gap": 695,
+        "num_batches": 69500
+    },
+    "Test": {
+        "batch_size": 30
+    },
+    "Infer": { 
+        "pre_trained": "",
+        "pre_trained_cond":"/root/home/project/ps6/Taeil/data/results/locomotion/log_20220728_2248/checkpoints/trained.pkg",
+        "pre_trained_foot":"",
+        "save_train" : "pre-trained foot contact (2part): /root/home/project/Data/results/log_20221205_0012/checkpoints/trained.pkg, pre-trained GMVAE : /root/home/project/ps6/Taeil/data/results/locomotion/log_20220728_2248/checkpoints/trained.pkg"
+    }
+}
+
