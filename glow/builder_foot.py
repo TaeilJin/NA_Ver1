@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from glow.models_ENV_FOOT import FOOT_estimator
 from glow.models_ENV_FOOT_Gating import FOOT_estimator_Gating
+from glow.models_ENV_MoE import cVAE_Gating
 from . import learning_rate_schedule
 from .config import JsonConfig
 from .models_Cond_GMVAE_ENV import CondGMVAE
@@ -33,6 +34,9 @@ def build_Foot(x_channels, cond_channels, hparams, is_training):
         graph = FOOT_estimator_Gating(x_channels, cond_channels, hparams.Gumbel.num_classes, hparams)
     elif  hparams.Train.footmodel == "concat":
         graph = FOOT_estimator(x_channels, cond_channels, hparams.Gumbel.num_classes, hparams)
+    elif hparams.Train.model == "gating_cVAE":
+        graph = cVAE_Gating(x_channels, cond_channels,hparams.Gumbel.num_classes, hparams)
+    
 
     graph.device = hparams.Device.glow
     if graph is not None:

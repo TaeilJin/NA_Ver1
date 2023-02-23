@@ -210,7 +210,7 @@ class Trainer_woGMM(object):
                 # at first time, initialize ActNorm
                 if self.global_step == 0:
                     self.graph(x[:self.batch_size // len(self.devices), ...],
-                               descriptor[:self.batch_size // len(self.devices), ...] if cond is not None else None,
+                               cond[:self.batch_size // len(self.devices), ...] if cond is not None else None,
                                ee_cond[:self.batch_size // len(self.devices), ...] if ee_cond is not None else None,
                                label = prob
                                )
@@ -229,13 +229,13 @@ class Trainer_woGMM(object):
                     #self.graph_cond = torch.nn.parallel.DataParallel(self.graph_cond, self.devices, self.devices[0])
                     
                 """ forward phase likelihood loss """
-                z, nll = self.graph(x=x, cond=descriptor, ee_cond = ee_cond, label = prob)
+                z, nll = self.graph(x=x, cond=cond, ee_cond = ee_cond, label = prob)
                 
                 nll = -nll
 
                 """ sampling and fidelity loss """
                 # hat to inverse
-                x_hat = self.graph(z= None, cond=descriptor, ee_cond=ee_cond, label=prob, reverse=True)
+                x_hat = self.graph(z= None, cond=cond, ee_cond=ee_cond, label=prob, reverse=True)
 
                 x_hat_pose = exp_utils.unNormalize_motion(x_hat.permute(0,2,1),self.mean,self.scale).clone().detach()
                 #x_hat_vel = exp_utils.unNormalize_vel(cond[:,:,:3].permute(0,2,1),self.mean,self.scale).clone().detach()
@@ -334,13 +334,13 @@ class Trainer_woGMM(object):
                             label = val_batch["label"]
                             
                             prob = prob.reshape(nBatch_cond,nTimesteps_cond,-1).permute(0,2,1).clone().detach()
-                            z_val, nll_val = self.graph(x=x_val, cond=des_val, ee_cond=ee_cond_val, label=prob)
+                            z_val, nll_val = self.graph(x=x_val, cond=cond_val, ee_cond=ee_cond_val, label=prob)
                             
                             nll_val = -(nll_val)
 
                             """ sampling and fidelity loss """
                             # hat to inverse
-                            x_hat = self.graph(z= None, cond=des_val, ee_cond=ee_cond_val, label=prob, reverse=True)
+                            x_hat = self.graph(z= None, cond=cond_val, ee_cond=ee_cond_val, label=prob, reverse=True)
 
                             x_hat_pose = exp_utils.unNormalize_motion(x_hat.permute(0,2,1),self.mean,self.scale).clone().detach()
                             #x_hat_vel = exp_utils.unNormalize_vel(cond[:,:,:3].permute(0,2,1),self.mean,self.scale).clone().detach()
@@ -405,7 +405,7 @@ class Trainer_woGMM(object):
                 
                 # generate samples and save
                 if self.global_step % self.plot_gaps == 0 and self.global_step > 0: 
-                    self.generator.generate_sample_withRef_History_woGMM(self.graph,self.graph_cond, eps_std=1.0, step=self.global_step)
+                    self.generator.generate_sample_withRef_cond_woGMM(self.graph,self.graph_cond, eps_std=1.0, step=self.global_step)
 
 
 

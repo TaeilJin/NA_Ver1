@@ -46,7 +46,7 @@ class Locomotion():
         feature = 3
         self.joint = 22 *feature
         
-        if hparams.Train.model == "gmm_env_gmm_label_foot" or hparams.Train.model == "gmm_env_wo_gmm" or hparams.Train.model == "gmm_env_gmm_label_3part" or hparams.Train.model == "gmm_env_gmm_label_foot_3part" or hparams.Train.model == "gmm_env_gmm_label_3part_noImpC" or hparams.Train.condmodel == "enc_foot":
+        if hparams.Train.model == "gmm_env_gmm_label_foot" or hparams.Train.model == "gmm_env_wo_gmm" or hparams.Train.model == "gmm_env_wo_gmm_woUpper" or hparams.Train.model == "gating_cVAE" or hparams.Train.model == "gmm_env_gmm_label_3part_noImpC" or hparams.Train.condmodel == "enc_foot":
             self.train_dataset = TrainDataset_Inpainting_FOOT(data_dir,hparams.Data.seqlen, hparams.Data.dropout, hparams.Data.dropout_env)
             self.test_dataset = TestDataset_Inpainting_FOOT(data_dir,hparams.Data.seqlen, hparams.Data.dropout, hparams.Data.dropout_env)
             self.validation_dataset = ValidDataset_Inpainting_FOOT(data_dir,hparams.Data.seqlen, hparams.Data.dropout, hparams.Data.dropout_env)

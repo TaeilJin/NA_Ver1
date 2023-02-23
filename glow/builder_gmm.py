@@ -5,6 +5,7 @@ from collections import defaultdict
 from . import learning_rate_schedule
 from .config import JsonConfig
 from .models_HierGlow_GMM_ENV import HierGlow_GMM_ENV
+from .models_HierGlow_noGMM_ENV_woUpper import HierGlow_woGMM_ENV_woUpper
 from .models_woHierGlow_GMM_ENV import Glow_GMM_ENV
 from .models_HierGlow_GMM_ENV_noEE import HierGlow_GMM_ENV_NOEE
 from .models_woHierGlow_GMM_ENV_upperCons import Glow_GMM_ENV_UPPER
@@ -41,6 +42,8 @@ def build_GMM(x_channels, cond_channels, hparams, is_training):
         graph = HierGlow_GMM_ENV(x_channels, cond_channels, hparams)
     elif hparams.Train.model =="gmm_env_wo_gmm": # ours wo gmm <-> diversity 영향
         graph = HierGlow_woGMM_ENV(x_channels, cond_channels, hparams)
+    elif hparams.Train.model =="gmm_env_wo_gmm_woUpper": # ours wo gmm <-> diversity 영향
+        graph = HierGlow_woGMM_ENV_woUpper(x_channels, cond_channels, hparams)
     elif hparams.Train.model =="gmm_env_gmm_label" or hparams.Train.model =="gmm_env_gmm_label_history":
         graph = HierGlow_label_ENV(x_channels,cond_channels,hparams)
     elif hparams.Train.model == "gmm_env_wo_upper": # ours wo hierarchy specify total pose <-> 하체가 상체에 영향

@@ -14,7 +14,7 @@ from . import thops
 from .generator import Generator
 from .distributions import SSLGaussMixture
 
-class Trainer_moglow(object):
+class Trainer_cVAE(object):
     def __init__(self, graph, optim, lrschedule, loaded_step,
                  devices, data_device,
                  data, log_dir, hparams):
@@ -37,6 +37,8 @@ class Trainer_moglow(object):
         self.graph = graph
         self.optim = optim
 
+        self.min_gumbel = hparams.Gumbel.fixed_temp_value
+        self.hard_gumbel = hparams.Gumbel.hard_gumbel
         # grad operation
         self.max_grad_clip = hparams.Train.max_grad_clip
         self.max_grad_norm = hparams.Train.max_grad_norm
@@ -60,7 +62,8 @@ class Trainer_moglow(object):
         
         self.generator = Generator(data, data_device, log_dir, hparams)
 
-        
+        self.calc_prior = hparams.Train.calc
+
         # validation batch
         self.val_data_loader = DataLoader(data.get_validation_dataset(),
                                       batch_size=self.batch_size,
@@ -85,12 +88,10 @@ class Trainer_moglow(object):
             
     def count_parameters(self, model):
          return sum(p.numel() for p in model.parameters() if p.requires_grad)    
+   
 
     def train(self):
 
-        self.global_step = self.loaded_step
-        # initial mean
-        self.n_epoches = (self.n_epoches * 695 - self.loaded_step) // 695
         # begin to train
         for epoch in range(self.n_epoches):
             print(f"epoch:{epoch} / {self.n_epoches}")
@@ -114,33 +115,10 @@ class Trainer_moglow(object):
                 for k in batch:
                     batch[k] = batch[k].to(self.data_device)
                 
-                x = batch["x"]          
-                cond = batch["cond"]
-                ee_cond = batch["ee_cond"]
-                label = batch["label"]
                 descriptor = batch["descriptor"]
+                x = batch["x"]
+                ee_cond = batch["ee_cond"]
 
-                
-                # init LSTM hidden
-                if hasattr(self.graph, "module"):
-                    self.graph.module.init_lstm_hidden()
-                else:
-                    self.graph.init_lstm_hidden()
-
-                # at first time, initialize ActNorm
-                if self.global_step == 0:
-                    self.graph(x[:self.batch_size // len(self.devices), ...],
-                               cond[:self.batch_size // len(self.devices), ...] if cond is not None else None,
-                               ee_cond[:self.batch_size // len(self.devices), ...] if ee_cond is not None else None,
-                               )
-                    # re-init LSTM hidden
-                    if hasattr(self.graph, "module"):
-                        self.graph.module.init_lstm_hidden()
-                    else:
-                        self.graph.init_lstm_hidden()
-                
-                #print("n_params: " + str(self.count_parameters(self.graph)))
-                
                 # parallel
                 if len(self.devices) > 1 and not hasattr(self.graph, "module"):
                     print("[Parallel] move to {}".format(self.devices))
@@ -148,20 +126,9 @@ class Trainer_moglow(object):
                     #self.graph_cond = torch.nn.parallel.DataParallel(self.graph_cond, self.devices, self.devices[0])
                     
                 # forward phase
-                z, nll = self.graph(x=x, cond=cond, ee_cond = ee_cond)
-                
-                if hasattr(self.graph, "module"):
-                    loss_generative = self.graph.module.loss_generative(nll)
-                else:
-                    loss_generative =self.graph.loss_generative(nll)
-
-                if self.global_step % self.scalar_log_gaps == 0:
-                    self.writer.add_scalar("loss/loss_generative", loss_generative, self.global_step)
-                    # self.writer.add_scalar("loss/accuracy",accuracy,self.global_step)
-                    # self.writer.add_scalar("loss/nmi",nmi,self.global_step)
-                    
-
-                loss = loss_generative
+                out_foot, loss = self.graph(x=x, cond = descriptor, ee_cond = ee_cond)
+                                   
+                loss = torch.mean(loss)
 
                 # backward
                 self.graph.zero_grad()
@@ -184,38 +151,28 @@ class Trainer_moglow(object):
                                         
                     # Validation forward phase
                     loss_val = 0
-                    acc_val =0
-                    nmi_val =0
                     n_batches = 0
                     for ii, val_batch in enumerate(self.val_data_loader):
                         for k in val_batch:
                             val_batch[k] = val_batch[k].to(self.data_device)
                             
                         with torch.no_grad():
-                            self.graph.eval()
-
+                            
                             # get validation data
-                            x_val=val_batch["x"]
-                            cond_val = val_batch["cond"]
-                            ee_cond_val =val_batch["ee_cond"]
                             des_val = val_batch["descriptor"]
-                            
-                            
-                            # calc flow gmm loss
-                            # init LSTM hidden
-                            if hasattr(self.graph, "module"):
-                                self.graph.module.init_lstm_hidden()
-                            else:
-                                self.graph.init_lstm_hidden()
-                            
-                    
-                            z_val, nll_val = self.graph(x=x_val, cond=cond_val, ee_cond=ee_cond_val)
-                            
+                            x_val = val_batch["x"]
+                            ee_cond_val = batch["ee_cond"]
+                            # forward phase
+                            output_val, loss_val = self.graph(x=x_val, cond = des_val, ee_cond=ee_cond_val)
+                                   
+                            nll_val = torch.mean(loss_val)
+
+
                             # total loss
                             if hasattr(self.graph, "module"):
-                                loss_val = loss_val + self.graph.module.loss_generative(nll_val)
+                                loss_val = loss_val + nll_val
                             else:
-                                loss_val = loss_val + self.graph.loss_generative(nll_val)
+                                loss_val = loss_val + nll_val
                             
                             # accuracy test ("확인용")  
                             # _, predicted_labels = torch.max(out_net['logits'], dim=1)
@@ -238,13 +195,14 @@ class Trainer_moglow(object):
                          pkg_dir=self.checkpoints_dir,
                          is_best=True,
                          max_checkpoints=self.max_checkpoints)
-
-                
                 # generate samples and save
                 if self.global_step % self.plot_gaps == 0 and self.global_step > 0: 
-                    if self.cond_model =="enc":
-                        self.generator.generate_sample_withRef_cond_moglow(self.graph, eps_std=1.0, step=self.global_step)
-
+                    if self.cond_model =="enc_rot":
+                        self.generator.generate_ROT_sample_withRef_cond(self.graph,gumbel_temp=self.fixed_temp_value,step=self.global_step)
+                    elif self.cond_model =="gating_cVAE":
+                        self.generator.generate_sample_withRef_cVAE(self.graph, eps_std=1.0, step=self.global_step)
+                
+                    
 
 
                 # global step

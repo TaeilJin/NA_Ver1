@@ -86,7 +86,7 @@ if __name__ == "__main__":
     # build graph_pose
     if hparams.Train.model =="moglow":
         built = build(x_channels,cond_channels,hparams,is_training)
-    elif hparams.Train.model == "gmm_env_gmm_label_history" or hparams.Train.model == "gmm_env_wo_gmm" or hparams.Train.model =="gmm_env_gmm_label_foot_history":
+    elif hparams.Train.model == "gmm_env_gmm_label_history" or hparams.Train.model =="gmm_env_gmm_label_foot_history":
         built = build_GMM(x_channels, descriptor_channels, hparams, is_training)
     else:
         built = build_GMM(x_channels, cond_channels, hparams, is_training)
@@ -99,10 +99,10 @@ if __name__ == "__main__":
             trainer = Trainer_moglow(**built, data=data, log_dir=log_dir, hparams=hparams)
         if hparams.Train.model=="gmm" or hparams.Train.model=="gmm_env" or hparams.Train.model=="gmm_env_wo" or  hparams.Train.model=="gmm_env_noEE" or hparams.Train.model =="gmm_env_with_label":
             trainer = Trainer_GMM(**built, graph_cond=built_Cond['graph'], data=data, log_dir=log_dir, hparams=hparams)
+        if hparams.Train.model =="gmm_env_wo_gmm" or hparams.Train.model =="gmm_env_wo_gmm_woUpper" or hparams.Train.model =="gmm_env_gmm_label":
+            trainer = Trainer_woGMM(**built, graph_cond=built_Cond['graph'], data=data, log_dir=log_dir, hparams=hparams)
         if hparams.Train.model=="gmm_env_wo_upper":
             trainer = Trainer_GMM_UPPER(**built, graph_cond=built_Cond['graph'], data=data, log_dir=log_dir, hparams=hparams)
-        if hparams.Train.model =="gmm_env_wo_gmm" or hparams.Train.model =="gmm_env_gmm_label":
-            trainer = Trainer_woGMM(**built, graph_cond=built_Cond['graph'], data=data, log_dir=log_dir, hparams=hparams)
         if  hparams.Train.model =="gmm_env_gmm_label":
             trainer = Trainer_Label(**built, graph_cond=built_Cond['graph'], data=data, log_dir=log_dir, hparams=hparams)
         if  hparams.Train.model == "gmm_env_gmm_label_history":

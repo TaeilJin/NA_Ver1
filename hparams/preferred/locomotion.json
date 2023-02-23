@@ -6,7 +6,7 @@
     },
     "Glow" : {
         "hidden_channels": 512,
-        "K": 8,
+        "K": 6,
         "actnorm_scale": 1.0,
         "flow_permutation": "invconv",
         "flow_coupling": "affine",
@@ -41,16 +41,16 @@
         }
     },
     "Device": {
-        "glow": ["cuda:1"],
-        "data": "cuda:1"
+        "glow": ["cuda:0"],
+        "data": "cuda:0"
     },
     "Train": {
-        "model": "gmm_env_wo_gmm",
+        "model": "gating_cVAE",
         "calc": "mu_var",
         "condmodel" :"enc",
-        "footmodel" :"concat",
+        "footmodel" :"gating_cVAE",
         "train_cond_enc":false,
-        "batch_size": 50,
+        "batch_size": 20,
         "validation_size": 90,
         "num_batches": 200000,
         "max_grad_clip": 5,

@@ -1114,6 +1114,82 @@ class Generator(object):
         # store the generated animations
         self.data.save_animation_withRef(np.concatenate((ee_all,control_all),axis=-1), sampled_all, reference_all, os.path.join(self.log_dir, f'Env_T1_{counter}_temp{str(int(eps_std*100))}_{str(step//1000)}k'))
 
+    def generate_sample_withRef_cVAE(self, graph, upper_cond =None, eps_std=1.0, step=0, counter=0):
+        print("generate_sample")
+        graph.eval()
+         
+        with torch.no_grad():
+            batch = self.test_batch
+
+            autoreg_all = batch["autoreg"].cpu().numpy()
+            control_all = batch["cond"].cpu().numpy()
+            env_all = batch["env"].cpu().numpy()
+            ee_all = batch["ee"].cpu().numpy()
+            foot_all = batch["foot"].cpu().numpy()
+            # Initialize the pose sequence with ground truth test data
+            seqlen = self.seqlen
+            n_lookahead = self.n_lookahead
+                
+            nn,n_timesteps,n_feats = autoreg_all.shape
+            sampled_all = np.zeros((nn, n_timesteps-n_lookahead, n_feats))
+            reference_all = np.zeros((nn, n_timesteps-n_lookahead, n_feats))
+            autoreg = np.zeros((nn, seqlen, n_feats), dtype=np.float32) #initialize from a mean pose
+            sampled_all[:,:seqlen,:] = autoreg
+            
+            # sample from Moglow
+            sampled_z_label = torch.zeros((nn,66,1)).to(self.data_device)
+
+
+            # Loop through control sequence and generate new data
+            for i in range(0,control_all.shape[1]-seqlen-n_lookahead):
+                control = control_all[:,i:(i+seqlen+1+n_lookahead),:]
+                refpose = autoreg_all[:,(i+seqlen):(i+seqlen+1),:]
+                # 전체 포즈에서 end-effector condition 을 만들어야한다
+                # ee_cond = self.prepare_ee_upper(refpose.copy(),head=True)
+                # #ee_cond = torch.zeros(nn,15,1)
+                # x_head = ee_cond[:,:3,:]
+                # x_hand = ee_cond[:,3:,:]
+                # if torch.all(x_head > 1e8):
+                #     x_head = None
+                # if torch.all(x_hand > 1e8):
+                #     x_hand = None
+                ee_cond =self.prepare_eecond(refpose.copy())
+
+
+                # prepare conditioning for moglow (control + previous poses)
+                descriptor = self.prepare_cond(autoreg.copy(), control.copy())
+                env = env_all[:,(i+seqlen):(i+seqlen+1+n_lookahead),:]
+                env = torch.from_numpy(np.swapaxes(env,1,2)).to(self.data_device)
+                
+                #start = time.time()
+                
+                # foot velocity
+                scene_feature = torch.cat((descriptor,env),dim=1)
+                nn, nF, nT = ee_cond.shape
+                ee_cond = ee_cond.permute(0,2,1)
+                ee_cond = ee_cond.reshape(nn*nT,-1).clone().detach()
+
+                masked_ee = torch.zeros((nn*nT,66)).to(ee_cond.device)
+                ee_cond = graph.addEndEffectorElement(masked_ee,ee_cond)
+                
+                scene_feature = scene_feature.permute(0,2,1).reshape(nn*nT,-1)
+                sampled = graph.cVAE.decoder(scene_feature, sampled_z_label[:,:,0], ee_cond)
+                
+                #start = time.time()
+                
+                #print(" computation time: " , time.time()-start)
+                sampled = sampled.cpu().numpy()
+
+                # store the sampled frame
+                sampled_all[:,(i+seqlen),:] = sampled # sampled
+                reference_all[:,(i+seqlen),:] = np.swapaxes(refpose,1,2)[:,:,0] # GT
+                # update saved pose sequence
+                autoreg = np.concatenate((autoreg[:,1:,:].copy(), sampled[:,None,:]), axis=1)
+                
+        # store the generated animations
+        self.data.save_animation_withRef(np.concatenate((ee_all,control_all),axis=-1), sampled_all, reference_all, os.path.join(self.log_dir, f'Env_T1_{counter}_temp{str(int(eps_std*100))}_{str(step//1000)}k'))
+
+
 
     def generate_sample_withRef_History_foot(self, graph, graph_cond, upper_cond =None, eps_std=1.0, step=0, counter=0):
         print("generate_sample")
@@ -1343,7 +1419,7 @@ class Generator(object):
             sampled_all[:,:seqlen,:] = autoreg
             
             # sample from Moglow
-            sampled_z_label = torch.zeros((nBatch,66,1)).to(self.data_device)
+            sampled_z_label = torch.zeros((nn,66,1)).to(self.data_device)
 
 
             # Loop through control sequence and generate new data

@@ -61,7 +61,7 @@ def build(x_channels, cond_channels, hparams, is_training):
         # 1. warm start from pre-trained model (on cpu)
         pre_trained = None
         loaded_step = 0
-        if is_training:
+        if hparams.Infer.pre_trained is "":
             if "warm_start" in hparams.Train and len(hparams.Train.warm_start) > 0:
                 pre_trained = hparams.Train.warm_start
         else:

@@ -246,6 +246,68 @@ class FootContactNet_Gating(nn.Module):
         return y_hat
 
 ##################################################################
+######### Pose CVAE ##############################################
+##################################################################
+class PoseCVAE_Encoder(nn.Module):
+    def __init__(self, state_dim=66, z_dim=66, **kwargs):
+        super(PoseCVAE_Encoder, self).__init__()
+        self.main = nn.Sequential(
+            nn.Linear(state_dim, 512),
+            nn.ELU(),
+            nn.Linear(512, 256),
+            nn.ELU(),
+            nn.Linear(256, 256),
+            nn.ELU())
+
+        self.INet = INet()
+        self.fc_mu = nn.Linear(256, z_dim)
+        self.fc_logvar = nn.Linear(256, z_dim)
+
+    def forward(self, p):
+        x = self.main(p)
+        return self.fc_mu(x), self.fc_logvar(x)
+
+
+class PoseCVAE_Decoder(nn.Module):
+    def __init__(self, state_dim=66, I_enc_dim=2640+66*10 + 3*11, z_dim=66, h_dim=256, rng=None, num_experts=10, h_dim_gate=256,
+                 **kwargs):
+        super(PoseCVAE_Decoder, self).__init__()
+        #self.INet = INet()
+        #pred_net_input_dim = state_dim + I_enc_dim + z_dim
+
+        self.gating_network = GatingNetwork(rng=rng, input_size=I_enc_dim+66, output_size=num_experts,
+                                            hidden_size=h_dim_gate, **kwargs)
+        self.prediction_net = PredictionNet(rng=rng, num_experts=num_experts,
+                                            input_size=z_dim, hidden_size=h_dim,
+                                            output_size=z_dim, z_dim=z_dim, **kwargs)
+
+    def forward(self, scene_feature, z_dim, ee_cond, I=None):
+        scene_feature = torch.cat((scene_feature,ee_cond),dim=1)
+        omega = self.gating_network(scene_feature)
+        #I = self.INet(I)
+        #x = torch.cat((p_prev, I), dim=1)
+        y_hat = self.prediction_net(z_dim, omega)
+        return y_hat
+
+
+class PoseCVAE(nn.Module):
+    def __init__(self, state_dim=66, **kwargs):
+        super(PoseCVAE, self).__init__()
+        self.encoder = PoseCVAE_Encoder(state_dim=state_dim, **kwargs)
+        self.decoder = PoseCVAE_Decoder(state_dim=state_dim, **kwargs)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        #std = torch.sqrt(var + 1e-10)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def forward(self, p, scenefeature, ee_cond):
+        mu, logvar = self.encoder(p)
+        z = self.reparameterize(mu, logvar)
+        return self.decoder(scenefeature, z, ee_cond), mu, logvar
+
+##################################################################
 ######### GOAL NET ##############################################
 ##################################################################
 
