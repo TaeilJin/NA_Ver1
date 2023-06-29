@@ -58,6 +58,18 @@ class Generator(object):
         ee_cond = torch.from_numpy(ee_cond)
         return ee_cond.to(self.data_device)
     
+    def ee_fromGT(self, upper_ee_idx,lower_ee_idx, refpose,no_EE_cond =False):
+        # 전체 포즈에서 end-effector condition 을 만들어야한다
+        ee_cond_upper = refpose[:,:, upper_ee_idx]
+        ee_cond_lower = refpose[:,:, lower_ee_idx]
+        ee_cond = np.concatenate((ee_cond_upper, ee_cond_lower), axis=-1)
+        if(no_EE_cond == True):
+            ee_cond = 0
+        else:
+            ee_cond[:,:,9:] = 0 # upper body
+        ee_cond = torch.from_numpy(ee_cond.swapaxes(1,2)).to(self.data_device)
+        return ee_cond.to(self.data_device)
+
     def prepare_ee_upper(self, jt_data, head =False, hands=False):
         # input data inside ee_cond 
         jt_data = np.swapaxes(jt_data,1,2)
@@ -1398,13 +1410,13 @@ class Generator(object):
         with torch.no_grad():
             batch = self.test_batch
 
-            autoreg_all = batch["autoreg"].cpu().numpy()
-            control_all = batch["cond"].cpu().numpy()
-            env_all = batch["env"].cpu().numpy()
-            ee_all = batch["ee"].cpu().numpy()
+            autoreg_all = batch["x"].cpu().numpy().swapaxes(1,2)
+            control_all = batch["cond_gt"].cpu().numpy().swapaxes(1,2)
+            env_all = batch["env_gt"].cpu().numpy().swapaxes(1,2)
+            ee_all = batch["ee_gt"].cpu().numpy().swapaxes(1,2)
+
             # Initialize the pose sequence with ground truth test data
             seqlen = self.seqlen
-            n_lookahead = self.n_lookahead
             
             # Initialize the lstm hidden state
             if hasattr(graph, "module"):
@@ -1413,8 +1425,8 @@ class Generator(object):
                 graph.init_lstm_hidden()
                 
             nn,n_timesteps,n_feats = autoreg_all.shape
-            sampled_all = np.zeros((nn, n_timesteps-n_lookahead, n_feats))
-            reference_all = np.zeros((nn, n_timesteps-n_lookahead, n_feats))
+            sampled_all = np.zeros((nn, n_timesteps, n_feats))
+            reference_all = np.zeros((nn, n_timesteps, n_feats))
             autoreg = np.zeros((nn, seqlen, n_feats), dtype=np.float32) #initialize from a mean pose
             sampled_all[:,:seqlen,:] = autoreg
             
@@ -1423,28 +1435,20 @@ class Generator(object):
 
 
             # Loop through control sequence and generate new data
-            for i in range(0,control_all.shape[1]-seqlen-n_lookahead):
-                control = control_all[:,i:(i+seqlen+1+n_lookahead),:]
+            for i in range(0,control_all.shape[1]-seqlen):
+                control = control_all[:,i:(i+seqlen+1),:]
                 refpose = autoreg_all[:,(i+seqlen):(i+seqlen+1),:]
-                # 전체 포즈에서 end-effector condition 을 만들어야한다
-                # ee_cond = self.prepare_ee_upper(refpose.copy(),head=True)
-                # #ee_cond = torch.zeros(nn,15,1)
-                # x_head = ee_cond[:,:3,:]
-                # x_hand = ee_cond[:,3:,:]
-                # if torch.all(x_head > 1e8):
-                #     x_head = None
-                # if torch.all(x_hand > 1e8):
-                #     x_hand = None
-                ee_cond =self.prepare_eecond(refpose.copy())
-
+                
+                ee_cond = self.ee_fromGT(graph.flow.select_layer_u.upper_ee_idx,graph.flow.select_layer_l.lower_ee_idx, 
+                refpose.copy(),no_EE_cond=False)
 
                 # prepare conditioning for moglow (control + previous poses)
                 descriptor = self.prepare_cond(autoreg.copy(), control.copy())
-                env = env_all[:,(i+seqlen):(i+seqlen+1+n_lookahead),:]
+                env = env_all[:,(i+seqlen):(i+seqlen+1),:]
                 env = torch.from_numpy(np.swapaxes(env,1,2)).to(self.data_device)
 
                 # condition (vel + env)
-                cond = control_all[:,(i+seqlen):(i+seqlen+1+n_lookahead),:]
+                cond = control_all[:,(i+seqlen):(i+seqlen+1),:]
                 cond = torch.from_numpy(np.swapaxes(cond,1,2)).to(self.data_device)
                 cond = torch.cat((cond,env),dim=1)
 
@@ -1483,6 +1487,7 @@ class Generator(object):
                 autoreg = np.concatenate((autoreg[:,1:,:].copy(), sampled[:,None,:]), axis=1)
                 
         # store the generated animations
+        
         self.data.save_animation_withRef(np.concatenate((ee_all,control_all),axis=-1), sampled_all, reference_all, os.path.join(self.log_dir, f'Env_T1_{counter}_temp{str(int(eps_std*100))}_{str(step//1000)}k'))
         #self.data.save_animation_UnityFile(sampled_all, ee_all, control_all, os.path.join(self.log_dir, f'Env_T1_{counter}_temp{str(int(eps_std*100))}_{str(step//1000)}k'))
         #self.data.save_animation_UnityFile(reference_all, ee_all, control_all, os.path.join(self.log_dir, f'Env_REF'))

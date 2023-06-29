@@ -4,6 +4,9 @@ import torch
 from collections import defaultdict
 from . import learning_rate_schedule
 from .config import JsonConfig
+from .models_NA_SAMP import models_NA_SAMP
+from .models_NA_SAMP_woEE import models_NA_SAMP_woEE
+
 from .models_HierGlow_GMM_ENV import HierGlow_GMM_ENV
 from .models_HierGlow_noGMM_ENV_woUpper import HierGlow_woGMM_ENV_woUpper
 from .models_woHierGlow_GMM_ENV import Glow_GMM_ENV
@@ -40,6 +43,10 @@ def build_GMM(x_channels, cond_channels, hparams, is_training):
         graph = HierGlow_GMM(x_channels, cond_channels, hparams)
     elif hparams.Train.model == "gmm_env" :
         graph = HierGlow_GMM_ENV(x_channels, cond_channels, hparams)
+    elif hparams.Train.model == "models_NA_SAMP":
+        graph = models_NA_SAMP(x_channels, cond_channels, hparams)
+    elif hparams.Train.model == "models_NA_SAMP_woEE":
+        graph = models_NA_SAMP_woEE(x_channels, cond_channels, hparams)
     elif hparams.Train.model =="gmm_env_wo_gmm": # ours wo gmm <-> diversity 영향
         graph = HierGlow_woGMM_ENV(x_channels, cond_channels, hparams)
     elif hparams.Train.model =="gmm_env_wo_gmm_woUpper": # ours wo gmm <-> diversity 영향

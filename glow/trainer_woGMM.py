@@ -61,6 +61,7 @@ class Trainer_woGMM(object):
                                       
         self.n_epoches = (hparams.Train.num_batches+len(self.data_loader)-1)
         self.n_epoches = self.n_epoches // len(self.data_loader)
+        #self.n_epoches = 120
         self.global_step = 0
         
         self.generator = Generator(data, data_device, log_dir, hparams)
@@ -68,8 +69,8 @@ class Trainer_woGMM(object):
         self.calc_prior = hparams.Train.calc
 
         # validation batch
-        self.val_data_loader = DataLoader(data.get_validation_dataset(),
-                                      batch_size=self.batch_size,
+        self.val_data_loader = DataLoader(data.get_test_dataset(),
+                                      batch_size=hparams.Test.batch_size,
                                       num_workers=8,
                                       shuffle=False,
                                       drop_last=True)
@@ -95,61 +96,6 @@ class Trainer_woGMM(object):
             
     def count_parameters(self, model):
          return sum(p.numel() for p in model.parameters() if p.requires_grad)    
-
-    def calc_means(self, means_type="random", num_means=2, shape=66, r=1, graph_cond=None, train_loader=None, device=None):
-        D = np.prod(shape)
-        means = torch.zeros((num_means, D)).to(device)
-        variance = torch.ones((num_means, D)).to(device)
-        #num_batches = torch.zeros((num_means, 1)).to(device)
-
-        if means_type == "random":
-            for i in range(num_means):
-                means[i] = r * torch.randn(D)  
-        else:
-            ''' use cGMVAE to compute means '''
-            with torch.no_grad():
-                self.graph_cond.eval()
-                progress = tqdm(self.data_loader)
-                n_batches =0
-                for i_batch, batch in enumerate(progress):
-                    # get batch data
-                    for k in batch:
-                        batch[k] = batch[k].to(self.data_device)
-                    # get descriptor data
-                    descriptor = batch["descriptor"]
-                
-                    nBatch_cond, nFeatures_cond, nTimesteps_cond = descriptor.shape
-                    des_enc = descriptor.permute(0,2,1).reshape(-1,nFeatures_cond).clone().detach()
-
-                    out_net  = self.graph_cond.network(des_enc,self.min_gumbel,self.hard_gumbel)
-
-                    # predicted
-                    _, predicted_labels = torch.max(out_net['logits'], dim=1)
-                    y_mu = out_net['y_mean']
-                    y_var = out_net['y_var']
-                    for c in range(num_means):
-                        idc_list = (predicted_labels == c).nonzero(as_tuple=False)
-
-                        if(idc_list.shape[0] > 0):
-                            y_mu_c = y_mu[idc_list[:,0],:]
-                            y_var_c = y_var[idc_list[:,0],:]
-
-                            y_mu_c = thops.mean(y_mu_c,dim=[0])
-                            y_var_c = thops.mean(y_var_c,dim=[0])
-
-                            means[c] = means[c]+ y_mu_c
-                            variance[c] = variance[c] + y_var_c
-                            #num_batches[c] = num_batches[c] + idc_list.shape[0]    
-                    n_batches = n_batches +1
-                
-                means = means / n_batches
-                variance = variance / n_batches
-                
-                # for i in range(num_means):
-                #     means[i] = means[i] / num_batches[i]
-                #     variance[i] = variance[i] / num_batches[i]
-        return means, variance
-                
 
     def train(self):
 
@@ -180,15 +126,13 @@ class Trainer_woGMM(object):
                 x = batch["x"]          
                 cond = batch["cond"]
                 ee_cond = batch["ee_cond"]
-                label = batch["label"]
-                descriptor = batch["descriptor"]
-                foot = batch["foot"]
-
+                sf = batch["sf"]
+                
                 # condition encoder -> prior decoding
                 with torch.no_grad():
                     self.graph_cond.eval()
-                    nBatch_cond, nFeatures_cond, nTimesteps_cond = descriptor.shape
-                    des_enc = descriptor.permute(0,2,1).reshape(-1,nFeatures_cond).clone().detach()
+                    nBatch_cond, nFeatures_cond, nTimesteps_cond = sf.shape
+                    des_enc = sf.permute(0,2,1).reshape(-1,nFeatures_cond).clone().detach()
                     
                     out_net  = self.graph_cond.network(des_enc,self.min_gumbel,self.hard_gumbel)
                     prob = out_net['prob_cat']
@@ -196,10 +140,7 @@ class Trainer_woGMM(object):
                     
                     prob = prob.reshape(nBatch_cond,nTimesteps_cond,-1).permute(0,2,1).clone().detach()
 
-                    # for accuracy test "load 확인용"
-                    #_, nFeatures_label = prob.shape
-                    #label_cond = label.reshape(-1,nFeatures_label).clone().detach()
-                    #accuracy, nmi = self.graph_cond.accuracy_test(predicted_labels.cpu().numpy(),label_cond[:,0].cpu().numpy())
+                    
                     
                 # init LSTM hidden
                 if hasattr(self.graph, "module"):
@@ -233,37 +174,36 @@ class Trainer_woGMM(object):
                 
                 nll = -nll
 
-                """ sampling and fidelity loss """
-                # hat to inverse
-                x_hat = self.graph(z= None, cond=cond, ee_cond=ee_cond, label=prob, reverse=True)
+                # """ sampling and fidelity loss """
+                # # hat to inverse
+                # x_hat = self.graph(z= None, cond=cond, ee_cond=ee_cond, label=prob, reverse=True)
 
-                x_hat_pose = exp_utils.unNormalize_motion(x_hat.permute(0,2,1),self.mean,self.scale).clone().detach()
-                #x_hat_vel = exp_utils.unNormalize_vel(cond[:,:,:3].permute(0,2,1),self.mean,self.scale).clone().detach()
+                # x_hat_pose = exp_utils.unNormalize_motion(x_hat.permute(0,2,1),self.mean,self.scale).clone().detach()
+                # #x_hat_vel = exp_utils.unNormalize_vel(cond[:,:,:3].permute(0,2,1),self.mean,self.scale).clone().detach()
                 
-                # Foot Loss
-                x_hat_vel = x_hat_pose[:,1:,:] - x_hat_pose[:,:-1,:]
+                # # Foot Loss
+                # x_hat_vel = x_hat_pose[:,1:,:] - x_hat_pose[:,:-1,:]
                 
-                joints_vel_fr = torch.abs(x_hat_vel[:,:,16]) # right foot
-                joints_vel_fl = torch.abs(x_hat_vel[:,:,20]) # left foot
-                joints_vel_tr = torch.abs(x_hat_vel[:,:,17]) # right toe
-                joints_vel_tl = torch.abs(x_hat_vel[:,:,21]) # left toe
+                # joints_vel_fr = torch.abs(x_hat_vel[:,:,16]) # right foot
+                # joints_vel_fl = torch.abs(x_hat_vel[:,:,20]) # left foot
+                # joints_vel_tr = torch.abs(x_hat_vel[:,:,17]) # right toe
+                # joints_vel_tl = torch.abs(x_hat_vel[:,:,21]) # left toe
                 
-                joints_vel_fr = joints_vel_fr * foot.permute(0,2,1)[:,:-1,0]
-                joints_vel_fl = joints_vel_fl * foot.permute(0,2,1)[:,:-1,1]
-                joints_vel_tr = joints_vel_tr * foot.permute(0,2,1)[:,:-1,2]
-                joints_vel_tl = joints_vel_tl * foot.permute(0,2,1)[:,:-1,3]
+                # joints_vel_fr = joints_vel_fr * foot.permute(0,2,1)[:,:-1,0]
+                # joints_vel_fl = joints_vel_fl * foot.permute(0,2,1)[:,:-1,1]
+                # joints_vel_tr = joints_vel_tr * foot.permute(0,2,1)[:,:-1,2]
+                # joints_vel_tl = joints_vel_tl * foot.permute(0,2,1)[:,:-1,3]
                 
-                foot_vel_loss = torch.mean(joints_vel_fr + joints_vel_fl + joints_vel_tr + joints_vel_tl)
+                # foot_vel_loss = torch.mean(joints_vel_fr + joints_vel_fl + joints_vel_tr + joints_vel_tl)
 
-                # Pose Velocity Loss
-                x_gt_pose = exp_utils.unNormalize_motion(x.permute(0,2,1).clone().detach(),self.mean,self.scale).clone().detach()
-                x_gt_vel = x_gt_pose[:,1:,:] - x_gt_pose[:,:-1,:]
+                # # Pose Velocity Loss
+                # x_gt_pose = exp_utils.unNormalize_motion(x.permute(0,2,1).clone().detach(),self.mean,self.scale).clone().detach()
+                # x_gt_vel = x_gt_pose[:,1:,:] - x_gt_pose[:,:-1,:]
 
-                pose_vel = torch.abs(x_hat_vel - x_gt_vel)
-                pose_vel_loss = torch.mean(pose_vel)
+                # pose_vel = torch.abs(x_hat_vel - x_gt_vel)
+                # pose_vel_loss = torch.mean(pose_vel)
 
-
-                nll = nll + foot_vel_loss + pose_vel_loss
+                #nll = nll + foot_vel_loss + pose_vel_loss
 
                 if hasattr(self.graph, "module"):
                     loss_generative = self.graph.module.loss_generative(nll)
@@ -272,8 +212,7 @@ class Trainer_woGMM(object):
 
                 if self.global_step % self.scalar_log_gaps == 0:
                     self.writer.add_scalar("loss/loss_generative", loss_generative, self.global_step)
-                    # self.writer.add_scalar("loss/accuracy",accuracy,self.global_step)
-                    # self.writer.add_scalar("loss/nmi",nmi,self.global_step)
+                    
                     
 
                 loss = loss_generative
@@ -315,8 +254,7 @@ class Trainer_woGMM(object):
                             x_val=val_batch["x"]
                             cond_val = val_batch["cond"]
                             ee_cond_val =val_batch["ee_cond"]
-                            des_val = val_batch["descriptor"]
-                            foot_val = val_batch["foot"]
+                            des_val = val_batch["sf"]
                             
                             # calc cond_encoder
                             nBatch_cond, nFeatures_cond, nTimesteps_cond = des_val.shape
@@ -331,45 +269,44 @@ class Trainer_woGMM(object):
                                 self.graph.module.init_lstm_hidden()
                             else:
                                 self.graph.init_lstm_hidden()
-                            label = val_batch["label"]
                             
                             prob = prob.reshape(nBatch_cond,nTimesteps_cond,-1).permute(0,2,1).clone().detach()
                             z_val, nll_val = self.graph(x=x_val, cond=cond_val, ee_cond=ee_cond_val, label=prob)
                             
                             nll_val = -(nll_val)
 
-                            """ sampling and fidelity loss """
-                            # hat to inverse
-                            x_hat = self.graph(z= None, cond=cond_val, ee_cond=ee_cond_val, label=prob, reverse=True)
+                            # """ sampling and fidelity loss """
+                            # # hat to inverse
+                            # x_hat = self.graph(z= None, cond=cond_val, ee_cond=ee_cond_val, label=prob, reverse=True)
 
-                            x_hat_pose = exp_utils.unNormalize_motion(x_hat.permute(0,2,1),self.mean,self.scale).clone().detach()
-                            #x_hat_vel = exp_utils.unNormalize_vel(cond[:,:,:3].permute(0,2,1),self.mean,self.scale).clone().detach()
+                            # x_hat_pose = exp_utils.unNormalize_motion(x_hat.permute(0,2,1),self.mean,self.scale).clone().detach()
+                            # #x_hat_vel = exp_utils.unNormalize_vel(cond[:,:,:3].permute(0,2,1),self.mean,self.scale).clone().detach()
                             
-                            # Foot Loss
-                            x_hat_vel = x_hat_pose[:,1:,:] - x_hat_pose[:,:-1,:]
+                            # # Foot Loss
+                            # x_hat_vel = x_hat_pose[:,1:,:] - x_hat_pose[:,:-1,:]
                             
-                            joints_vel_fr = torch.abs(x_hat_vel[:,:,16]) # right foot
-                            joints_vel_fl = torch.abs(x_hat_vel[:,:,20]) # left foot
-                            joints_vel_tr = torch.abs(x_hat_vel[:,:,17]) # right toe
-                            joints_vel_tl = torch.abs(x_hat_vel[:,:,21]) # left toe
+                            # joints_vel_fr = torch.abs(x_hat_vel[:,:,16]) # right foot
+                            # joints_vel_fl = torch.abs(x_hat_vel[:,:,20]) # left foot
+                            # joints_vel_tr = torch.abs(x_hat_vel[:,:,17]) # right toe
+                            # joints_vel_tl = torch.abs(x_hat_vel[:,:,21]) # left toe
                             
-                            joints_vel_fr = joints_vel_fr * foot.permute(0,2,1)[:,:-1,0]
-                            joints_vel_fl = joints_vel_fl * foot.permute(0,2,1)[:,:-1,1]
-                            joints_vel_tr = joints_vel_tr * foot.permute(0,2,1)[:,:-1,2]
-                            joints_vel_tl = joints_vel_tl * foot.permute(0,2,1)[:,:-1,3]
+                            # joints_vel_fr = joints_vel_fr * foot.permute(0,2,1)[:,:-1,0]
+                            # joints_vel_fl = joints_vel_fl * foot.permute(0,2,1)[:,:-1,1]
+                            # joints_vel_tr = joints_vel_tr * foot.permute(0,2,1)[:,:-1,2]
+                            # joints_vel_tl = joints_vel_tl * foot.permute(0,2,1)[:,:-1,3]
                             
-                            foot_vel_loss_val = torch.mean(joints_vel_fr + joints_vel_fl + joints_vel_tr + joints_vel_tl)
+                            # foot_vel_loss_val = torch.mean(joints_vel_fr + joints_vel_fl + joints_vel_tr + joints_vel_tl)
 
-                            # Pose Velocity Loss
-                            x_gt_pose = exp_utils.unNormalize_motion(x_val.permute(0,2,1).clone().detach(),self.mean,self.scale).clone().detach()
-                            x_gt_vel = x_gt_pose[:,1:,:] - x_gt_pose[:,:-1,:]
+                            # # Pose Velocity Loss
+                            # x_gt_pose = exp_utils.unNormalize_motion(x_val.permute(0,2,1).clone().detach(),self.mean,self.scale).clone().detach()
+                            # x_gt_vel = x_gt_pose[:,1:,:] - x_gt_pose[:,:-1,:]
 
-                            pose_vel = torch.abs(x_hat_vel - x_gt_vel)
-                            pose_vel_loss = torch.mean(pose_vel)
+                            # pose_vel = torch.abs(x_hat_vel - x_gt_vel)
+                            # pose_vel_loss = torch.mean(pose_vel)
 
-                            nll_val = nll_val + foot_vel_loss_val + pose_vel_loss
+                            # nll_val = nll_val + foot_vel_loss_val + pose_vel_loss
 
-                            foot_loss_val = foot_loss_val + foot_vel_loss_val
+                            #foot_loss_val = foot_loss_val + foot_vel_loss_val
                             # total loss
                             if hasattr(self.graph, "module"):
                                 loss_val = loss_val + self.graph.module.loss_generative(nll_val)
@@ -402,6 +339,7 @@ class Trainer_woGMM(object):
                          pkg_dir=self.checkpoints_dir,
                          is_best=True,
                          max_checkpoints=self.max_checkpoints)
+
                 
                 # generate samples and save
                 if self.global_step % self.plot_gaps == 0 and self.global_step > 0: 
@@ -412,7 +350,8 @@ class Trainer_woGMM(object):
                 # global step
                 self.global_step += 1
             print(
-                f'Loss: {loss.item():.5f}/ foot_loss: {foot_vel_loss:.5f} / Validation Loss: {loss_val:.5f} / foot_val_loss:{foot_loss_val:.5f}'
+                f'Loss: {loss.item():.5f} // Validation Loss: {loss_val:.5f}'
+
             )
 
         self.writer.export_scalars_to_json(os.path.join(self.log_dir, "all_scalars.json"))

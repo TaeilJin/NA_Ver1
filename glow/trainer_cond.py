@@ -56,17 +56,21 @@ class Trainer_Cond(object):
         self.n_epoches = self.n_epoches // len(self.data_loader)
         self.global_step = 0
         
-        self.generator = Generator_Cond(data, data_device, log_dir, hparams)
-
+        """ Model """
         self.fixed_temp = hparams.Gumbel.fixed_temp
         self.fixed_temp_value = hparams.Gumbel.fixed_temp_value
-        
         self.cond_model = hparams.Train.condmodel
 
-        self.default_steps = 60000
+        self.default_steps = 100000
         self.N = self.default_steps // len(self.data_loader)
         graph.decay_temp_rate = (graph.init_temp - graph.min_temp) /self.N
         
+
+
+        """ TEST data & visualization """
+
+        self.generator = Generator_Cond(data, data_device, log_dir, hparams)
+      
 
         # graph.decay_temp_rate = (graph.init_temp - graph.min_temp) /self.n_epoches
         # self.seqlen = hparams.Data.seqlen
@@ -83,8 +87,8 @@ class Trainer_Cond(object):
             # self.test_batch[k] = self.test_batch[k].to(self.data_device)
 
         # validation batch
-        self.val_data_loader = DataLoader(data.get_validation_dataset(),
-                                      batch_size=self.batch_size,
+        self.val_data_loader = DataLoader(data.get_test_dataset(),
+                                      batch_size=hparams.Test.batch_size,
                                       num_workers=8,
                                       shuffle=False,
                                       drop_last=True)
@@ -124,6 +128,7 @@ class Trainer_Cond(object):
                                                              
                 for param_group in self.optim.param_groups:
                     param_group['lr'] = lr
+                
                 self.optim.zero_grad()
                 if self.global_step % self.scalar_log_gaps == 0:
                     self.writer.add_scalar("lr/lr", lr, self.global_step)
@@ -131,19 +136,9 @@ class Trainer_Cond(object):
                 # get batch data
                 for k in batch:
                     batch[k] = batch[k].to(self.data_device)
-                x = batch["x"]          
-                cond = batch["cond"]
-                ee_cond = batch["ee_cond"]
-                descriptor = batch["descriptor"]
-                label =batch["label"]
-
-                nBatch, nTimesteps, nFeatures = label.shape
-                label = label.reshape(-1,nFeatures)
-
-                #nBatch, nFeatures, nTimesteps = label_prob.shape
-                #label_prob = label_prob.permute(0,2,1).reshape(-1,nFeatures)
-
-
+                descriptor = batch["sf"]
+                
+                
                 # parallel
                 if len(self.devices) > 1 and not hasattr(self.graph, "module"):
                     print("[Parallel] move to {}".format(self.devices))
@@ -157,17 +152,11 @@ class Trainer_Cond(object):
                 
                 total_loss, recon_loss, gaussian_loss,cate_loss, predict_label = self.graph(cond=descriptor,label_prob=None, gumbel_temp=gumbel_temp, hard_gumbel= self.graph.hard_gumbel)
                 
-                with torch.no_grad():
-                    # classification loss               
-                    accuracy, nmi = self.graph.accuracy_test(predict_label.cpu().numpy(),label[:,0].cpu().numpy())
-
                 if self.global_step % self.scalar_log_gaps == 0:
                     self.writer.add_scalar("loss/total_loss", total_loss, self.global_step)
                     self.writer.add_scalar("loss/recon_loss", recon_loss, self.global_step)
                     self.writer.add_scalar("loss/guassian_loss", gaussian_loss, self.global_step)
                     self.writer.add_scalar("loss/cate_loss", cate_loss, self.global_step)
-                    self.writer.add_scalar("info/Test_accuracy", accuracy, self.global_step)
-                    self.writer.add_scalar("info/Test_nmi", nmi, self.global_step)
                     self.writer.add_scalar("info/gumbel_temp", gumbel_temp, self.global_step)
                    
                 loss = total_loss
@@ -194,47 +183,30 @@ class Trainer_Cond(object):
                                         
                     # Validation forward phase
                     loss_val = 0
-                    acc_val = 0
-                    nmi_val = 0
                     n_batches = 0
                     for ii, val_batch in enumerate(self.val_data_loader):
                         for k in val_batch:
                             val_batch[k] = val_batch[k].to(self.data_device)
                             
                         with torch.no_grad():
-                            label =val_batch["label"]
-                            
-                            nBatch, nTimesteps, nFeatures = label.shape
-                            label = label.reshape(-1,nFeatures)
                             
                             if self.fixed_temp == True:
                                 gumbel_temp = self.fixed_temp_value
                             else:
                                 gumbel_temp = self.graph.update_temperature(epoch)
-                            val_total_loss, _,_,_,predict_label = self.graph(cond=val_batch["descriptor"],label_prob=None, gumbel_temp=gumbel_temp, hard_gumbel= self.graph.hard_gumbel)
+                            val_total_loss, _,_,_,predict_label = self.graph(cond=val_batch["sf"],label_prob=None, gumbel_temp=gumbel_temp, hard_gumbel= self.graph.hard_gumbel)
 
                             # loss
                             loss_val = loss_val + val_total_loss
                             n_batches = n_batches + 1        
                             
-                            # classification loss               
-                            accuracy, nmi = self.graph.accuracy_test(predict_label.cpu().numpy(),label[:,0].cpu().numpy())
-                            acc_val += accuracy
-                            nmi_val += nmi
                     
                     loss_val = loss_val/n_batches
-                    acc_val = acc_val/n_batches
-                    nmi_val = nmi_val/ n_batches
                     self.writer.add_scalar("val_loss/val_loss_generative", loss_val, self.global_step)
-                    self.writer.add_scalar("val_loss/Test_accuracy", acc_val, self.global_step)
-                    self.writer.add_scalar("val_loss/Test_nmi", nmi_val, self.global_step)
-                
-                #self.generator.generate_sample_accuracy(self.graph,gumbel_temp=self.fixed_temp_value)
-                # generate samples and save
+
+                #generate samples and save
                 if self.global_step % self.plot_gaps == 0 and self.global_step > 0:   
-                    if self.cond_model =="enc_rot":
-                        self.generator.get_cluster_performance_train_ROT(self.graph,gumbel_temp=self.fixed_temp_value,step=self.global_step)
-                    elif self.cond_model =="enc":
+                  if self.cond_model =="enc":
                         self.generator.get_cluster_performance_train(self.graph,gumbel_temp=self.fixed_temp_value, step= self.global_step)
 
                 # checkpoints
@@ -249,7 +221,7 @@ class Trainer_Cond(object):
                 # global step
                 self.global_step += 1
             print(
-                f'Loss: {loss.item():.5f} Test_acc: {accuracy:0.5f} Test_nmi: {nmi:0.5f} / Validation Loss: {loss_val:.5f} Test_acc:{acc_val:0.5f} Test_nmi:{nmi_val}'
+                f'Loss: {loss.item():.5f} / Validation Loss: {loss_val:.5f}'
             )
 
         self.writer.export_scalars_to_json(os.path.join(self.log_dir, "all_scalars.json"))

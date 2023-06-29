@@ -47,7 +47,13 @@ class LocomotionRot():
         self.train_dataset = TrainDataset_Rot(data_dir,hparams.Data.seqlen, hparams.Data.dropout)
         self.test_dataset = TestDataset_Rot(data_dir,hparams.Data.seqlen, hparams.Data.dropout)
         self.validation_dataset = ValidDataset_Rot(data_dir,hparams.Data.seqlen, hparams.Data.dropout)
-                
+
+        self.parents = np.array([0,1,2,3,4,5, 
+            4,7,8,9,
+            4,11,12,13,
+            1,15,16,17,
+            1,19,20,21]) - 1
+
         self.env_dim = 2640
         self.n_x_channels = self.joint
         self.n_descriptor_channels = self.n_x_channels*hparams.Data.seqlen + 3*(hparams.Data.seqlen + 1 + hparams.Data.n_lookahead) + self.env_dim
@@ -127,14 +133,10 @@ class LocomotionRot():
         for i in range(0,n_clips):
             filename_ = f'{filename}_{str(i)}.mp4'
             print('writing:' + filename_)
-            parents = np.array([0,1,2,3,4,5, 
-            4,7,8,9,
-            4,11,12,13,
-            1,15,16,17,
-            1,19,20,21]) - 1
+            
             anim_clip_input = np.concatenate((anim_clip[...,:66],anim_clip[...,-3:]),axis=-1) # get position features
             ref_clip_input = np.concatenate((ref_clip[...,:66],ref_clip[...,-3:]),axis=-1) # get position features
-            plot_animation_withRef(anim_clip_input[i,self.seqlen:,:],ref_clip_input[i,self.seqlen:,:], parents, filename_, fps=self.frame_rate, axis_scale=3.0)
+            plot_animation_withRef(anim_clip_input[i,self.seqlen:,:],ref_clip_input[i,self.seqlen:,:], self.parents, filename_, fps=self.frame_rate, axis_scale=3.0)
 
     def save_animation(self, control_data, motion_data, filename):
         animation_data = np.concatenate((motion_data,control_data), axis=2)

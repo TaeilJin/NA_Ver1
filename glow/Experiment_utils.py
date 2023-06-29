@@ -15,6 +15,29 @@ def inv_standardize(data, scaler):
         scaled = scaler.inverse_transform(flat).reshape(shape)
     return scaled        
 
+def Normalize_data(data,scaler_mean,scaler_scale):
+    shape = data.shape
+    std = scaler_scale
+    std[std<1e-3] = 1e-3
+    
+    if len(shape) == 2 : 
+        scaled = (data - scaler_mean) / std
+    else:
+        flat = data.reshape((shape[0]*shape[1], shape[2]))
+        scaled = (flat - scaler_mean) / std
+        scaled = scaled.reshape(shape)
+    return scaled
+
+def unNormalize_data(data,scaler_mean,scaler_scale):
+    shape = data.shape
+    if len(shape) == 2 : 
+        scaled = scaler_mean + data * scaler_scale
+    else:
+        flat = data.reshape((shape[0]*shape[1], shape[2]))
+        scaled = scaler_mean + flat * scaler_scale
+        scaled = scaled.reshape(shape)
+    return scaled     
+
 def Normalize_motion(pose_data,scaler):
     shape = pose_data.shape
     std = scaler.scale_[:66]

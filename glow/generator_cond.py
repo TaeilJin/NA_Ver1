@@ -36,6 +36,12 @@ class Generator_Cond(object):
         for k in self.test_batch:
             self.test_batch[k] = self.test_batch[k].to(self.data_device)
 
+        self.parents = np.array([0,1,2,3,4,5, 
+            4,7,8,9,
+            4,11,12,13,
+            1,15,16,17,
+            1,19,20,21]) - 1
+
         # train batch (for selecting class number )
         self.batch_size = hparams.Train.batch_size
         self.train_dataset = data.get_train_dataset()
@@ -379,7 +385,7 @@ class Generator_Cond(object):
         print("get cluster performance")
         progress = tqdm(self.data_loader)
         num_total_data = self.train_dataset.__len__()
-        batch_ind = np.random.randint(0,30+1)
+    
         total_poseValue_inCluster = np.zeros(graph.num_classes)
         total_apdValue_inCluster = np.zeros(graph.num_classes)
         total_num_inCluster = np.zeros(graph.num_classes)
@@ -388,7 +394,9 @@ class Generator_Cond(object):
         num_priority_label = 3
         total_maxPriority_inCluster = np.zeros((graph.num_classes, num_priority_label))
         
-        n_datas = torch.zeros((graph.num_classes))       
+        n_datas = torch.zeros((graph.num_classes)) 
+
+        batch_ind = 5    
         for i_batch, batch in enumerate(progress):
 
             for k in batch:
@@ -397,8 +405,7 @@ class Generator_Cond(object):
             x = batch["x"]          
             cond = batch["cond"]
             ee_cond = batch["ee_gt"]
-            label = batch["label"]
-            descriptor = batch["descriptor"]
+            descriptor = batch["sf"]
             # condition encoder -> prior decoding
             with torch.no_grad():
                 graph.eval()
@@ -427,12 +434,10 @@ class Generator_Cond(object):
                     #
                     x_batch = x.permute(0,2,1).reshape(nBatch_cond*nTimesteps_cond,-1).clone().detach() #(B*T,nFeats)
                     c_batch = cond.permute(0,2,1).reshape(nBatch_cond*nTimesteps_cond,-1).clone().detach() #(B*T, nFeats)
-                    label_batch = label.reshape(nBatch_cond*nTimesteps_cond,-1).clone().detach()
                     ee_batch    = ee_cond.permute(0,2,1).reshape(nBatch_cond*nTimesteps_cond,-1).clone().detach()
 
                     x_0 = x_batch[predict_0,:].cpu().numpy()
                     c_0 = c_batch[predict_0,:].cpu().numpy()
-                    l_0 = label_batch[predict_0,:]
                     ee_0 = ee_batch[predict_0,:].cpu().numpy()
 
                     #
@@ -450,14 +455,9 @@ class Generator_Cond(object):
                         ee_0_clip = ee_0[np.newaxis,...].copy()
                         ee_0_clip_r = np.zeros_like(ee_0_clip).copy()
                         if i_batch == batch_ind:
-                            self.data.save_animation_withRef(np.concatenate((ee_0_clip,ee_0_clip_r, c_0_clip),axis=-1),x_0_clip,x_0_clip, os.path.join(self.log_dir, f'Sample_poses_{i_batch}_{step//1000}k_{i}'))
+                            self.data.save_animation_withRef(np.concatenate((ee_0_clip, c_0_clip),axis=-1),x_0_clip,x_0_clip, os.path.join(self.log_dir, f'Sample_poses_{i_batch}_{step//1000}k_{i}'))
                     else:
                         apdValue_inCluster[i] = 0
-                    #
-                    l_o_p = np.zeros(num_priority_label)
-                    for k in range(num_priority_label):
-                        l_o_p[k] = (l_0[:,0] == k).nonzero(as_tuple=False)[:,0].cpu().numpy().shape[0]
-                    total_maxPriority_inCluster[i,:] = total_maxPriority_inCluster[i,:]+l_o_p
                     
 
                 # calc Score ( cluster 안의 APD(low), Cluster안의 포즈 개수( 개수 / 전체 개수, low), prob(1/num_cls) 와 비슷한 값들 개수(low))
@@ -484,7 +484,6 @@ class Generator_Cond(object):
         # print(f"high_priority_label_{total_maxPriority_inCluster}")
 
         print(f"poseInSideRatio_{(total_num_inCluster/(np.sum(total_num_inCluster)))}/{np.sum(total_num_inCluster)}")
-        print(f"high_priority_label_{total_maxPriority_inCluster}")
         
         
         
